@@ -53,7 +53,8 @@ const PROFILE_LABELS: Record<Profile, string> = {
   admin: "Administrateur",
 };
 
-let currentModule = 0;
+let currentUser: any = null;
+let currentModule: any = null;
 
 // Maps a profile to its default home screen
 function homeScreen(profile: string): Screen {
@@ -486,7 +487,8 @@ function ScreenLogin({
 
       // Login successful
       onLogin({
-        name: data.user_name,
+        username: data.user_name,
+        userId: data.userId,
         profile: data.role_name,
       });
     } catch (error) {
@@ -625,7 +627,11 @@ function ModuleStatusBadge({
 // une ligne par question suivie par l'utilisateur (user_id=1 pour l'instant,
 // codé en dur côté backend en attendant un vrai système de connexion).
 async function fetchAgentModules() {
-  const response = await fetch("http://localhost:5000/tracking");
+  const response = await fetch("http://localhost:5000/tracking", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ userId: currentUser }),
+  });
 
   if (!response.ok) {
     throw new Error("Erreur lors de la récupération des modules");
@@ -1982,7 +1988,7 @@ const DEFAULT_USER: AppUser = {
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>("landing");
-  const [user, setUser] = useState<AppUser>(DEFAULT_USER);
+  const [user, setUser] = useState<any>(DEFAULT_USER);
 
   // Cette variable retient l'id du DERNIER module sur lequel l'agent a
   // cliqué "Consulter". C'est elle qui fait le lien entre l'écran
@@ -2003,8 +2009,9 @@ export default function App() {
     navigate("lesson");
   }
 
-  function login(u: AppUser) {
+  function login(u: any) {
     setUser(u);
+    currentUser = u.userId;
     navigate(homeScreen(u.profile));
   }
 
