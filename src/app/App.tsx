@@ -543,33 +543,6 @@ function ScreenLogin({
 }
 
 // ─── Screen 4 — Agent Home ────────────────────────────────────────────────────
-const modules = [
-  {
-    id: 1,
-    name: "Introduction à Airbooks",
-    status: "done" as const,
-  },
-  {
-    id: 2,
-    name: "Gestion des réservations",
-    status: "in-progress" as const,
-  },
-  {
-    id: 3,
-    name: "Émission de billets",
-    status: "locked" as const,
-  },
-  {
-    id: 4,
-    name: "Facturation et paiements",
-    status: "locked" as const,
-  },
-  {
-    id: 5,
-    name: "Rapports et exports",
-    status: "locked" as const,
-  },
-];
 
 function ModuleStatusBadge({
   status,
@@ -595,15 +568,89 @@ function ModuleStatusBadge({
   );
 }
 
+// Appelle le backend (GET /tracking) pour récupérer, pour chaque module,
+// une ligne par question suivie par l'utilisateur (user_id=1 pour l'instant,
+// codé en dur côté backend en attendant un vrai système de connexion).
+async function fetchAgentModules() {
+  const response = await fetch("http://localhost:5000/tracking");
+
+  if (!response.ok) {
+    throw new Error("Erreur lors de la récupération des modules");
+  }
+
+  // Le backend renvoie un tableau du type :
+  // [{ user_name, module_id, title, progression_status }, ...]
+  // avec PLUSIEURS lignes pour le même module (une par question).
+  return response.json();
+}
+
+// Regroupe les lignes reçues (une par question) en UNE seule ligne par
+// module, avec un statut simple : "done" si toutes les questions du
+// module sont "Completed", "in-progress" si au moins une question a
+// été commencée, sinon "locked".
+function groupRowsByModule(
+  rows: { module_id: number; title: string; progression_status: string }[],
+) {
+  const parModule = new Map<
+    number,
+    { id: number; name: string; statuses: string[] }
+  >();
+
+  for (const row of rows) {
+    if (!parModule.has(row.module_id)) {
+      parModule.set(row.module_id, {
+        id: row.module_id,
+        name: row.title,
+        statuses: [],
+      });
+    }
+    parModule.get(row.module_id)!.statuses.push(row.progression_status);
+  }
+
+  return Array.from(parModule.values()).map((mod) => {
+    const toutTermine = mod.statuses.every((s) => s === "Completed");
+    const auMoinsUnCommence = mod.statuses.some((s) => s !== "Inactive");
+
+    let status: "done" | "in-progress" | "locked";
+    if (toutTermine) status = "done";
+    else if (auMoinsUnCommence) status = "in-progress";
+    else status = "locked";
+
+    return { id: mod.id, name: mod.name, status };
+  });
+}
+
 function ScreenAgentHome({
   user,
   onNavigate,
   onLogout,
+  onOpenModule, // fonction reçue depuis App() : on lui donne l'id du module cliqué
 }: {
   user: AppUser;
   onNavigate: (s: Screen) => void;
   onLogout: () => void;
+  onOpenModule: (moduleId: number) => void;
 }) {
+  // Liste des modules affichés sur l'accueil, une fois reçus du backend.
+  const [modules, setModules] = useState<
+    { id: number; name: string; status: "done" | "in-progress" | "locked" }[]
+  >([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Se déclenche une seule fois, quand l'écran d'accueil s'affiche.
+  useEffect(() => {
+    fetchAgentModules()
+      .then((rows) => setModules(groupRowsByModule(rows)))
+      .catch((err) => {
+        console.error(err);
+        setError("Impossible de charger vos modules.");
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  function nextLesson() {}
+
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <NavInternal
@@ -623,43 +670,57 @@ function ScreenAgentHome({
           </p>
         </div>
         <div className="space-y-4">
-          {modules.map((mod) => (
-            <div
-              key={mod.id}
-              className={`bg-white rounded-xl border px-6 py-5 flex items-center justify-between transition-shadow ${mod.status === "locked" ? "border-gray-100 opacity-60" : "border-gray-100 hover:shadow-sm"}`}
-            >
-              <div className="flex items-center gap-4">
-                <div
-                  className={`w-10 h-10 rounded-lg flex items-center justify-center text-sm font-bold ${mod.status === "done" ? "bg-green-50 text-green-700" : mod.status === "in-progress" ? "bg-yellow-50 text-yellow-700" : "bg-gray-100 text-gray-400"}`}
-                >
-                  {mod.id}
-                </div>
-                <div>
-                  <p className="font-semibold text-gray-800 text-sm">
-                    {mod.name}
-                  </p>
-                  <div className="mt-1">
-                    <ModuleStatusBadge status={mod.status} />
+          {/* Cas 1 : on attend encore la réponse du serveur */}
+          {loading && (
+            <p className="text-sm text-gray-500">Chargement des modules…</p>
+          )}
+
+          {/* Cas 2 : l'appel API a échoué */}
+          {!loading && error && <p className="text-sm text-red-600">{error}</p>}
+
+          {/* Cas 3 : tout s'est bien passé, on affiche une carte par module */}
+          {!loading &&
+            !error &&
+            modules.map((mod) => (
+              <div
+                key={mod.id}
+                className={`bg-white rounded-xl border px-6 py-5 flex items-center justify-between transition-shadow ${mod.status === "locked" ? "border-gray-100 opacity-60" : "border-gray-100 hover:shadow-sm"}`}
+              >
+                <div className="flex items-center gap-4">
+                  <div
+                    className={`w-10 h-10 rounded-lg flex items-center justify-center text-sm font-bold ${mod.status === "done" ? "bg-green-50 text-green-700" : mod.status === "in-progress" ? "bg-yellow-50 text-yellow-700" : "bg-gray-100 text-gray-400"}`}
+                  >
+                    {mod.id}
+                  </div>
+                  <div>
+                    <p className="font-semibold text-gray-800 text-sm">
+                      {mod.name}
+                    </p>
+                    <div className="mt-1">
+                      <ModuleStatusBadge status={mod.status} />
+                    </div>
                   </div>
                 </div>
+                {mod.status !== "locked" ? (
+                  <button
+                    // ÉTAPE 1 : quand on clique ici, on envoie l'id de CE module
+                    // précis (mod.id) à la fonction onOpenModule.
+                    // C'est cette étape qui "capture" quel module a été choisi.
+                    onClick={() => onOpenModule(mod.id)}
+                    className="bg-blue-600 text-white px-5 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700 transition-colors flex items-center gap-1.5"
+                  >
+                    Consulter <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                ) : (
+                  <button
+                    disabled
+                    className="border border-gray-200 text-gray-300 px-5 py-2 rounded-lg text-sm font-semibold cursor-not-allowed flex items-center gap-1.5"
+                  >
+                    <Lock className="w-3.5 h-3.5" /> Verrouillé
+                  </button>
+                )}
               </div>
-              {mod.status !== "locked" ? (
-                <button
-                  onClick={() => onNavigate("lesson")}
-                  className="bg-blue-600 text-white px-5 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700 transition-colors flex items-center gap-1.5"
-                >
-                  Consulter <ChevronRight className="w-3.5 h-3.5" />
-                </button>
-              ) : (
-                <button
-                  disabled
-                  className="border border-gray-200 text-gray-300 px-5 py-2 rounded-lg text-sm font-semibold cursor-not-allowed flex items-center gap-1.5"
-                >
-                  <Lock className="w-3.5 h-3.5" /> Verrouillé
-                </button>
-              )}
-            </div>
-          ))}
+            ))}
         </div>
       </main>
     </div>
@@ -667,25 +728,107 @@ function ScreenAgentHome({
 }
 
 // ─── Screen 5 — Lesson / Video ────────────────────────────────────────────────
-const sidebarModules = [
+
+// Cette fonction fait UNE SEULE chose : demander au backend "donne-moi
+// les cours (leçons) du module numéro X". Elle ne touche à aucun affichage,
+// elle renvoie juste les données brutes reçues du serveur.
+async function fetchCoursesByModule(moduleId: number) {
+  // On envoie une requête POST à l'adresse de ton API, avec le module_id
+  // dans le corps de la requête (body), comme ton backend l'attend.
+  const response = await fetch("http://localhost:5000/course", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ module_id: moduleId }),
+  });
+
+  // Si le serveur répond une erreur (ex: 400, 500), on arrête tout de suite
+  // et on lève une erreur, qui sera récupérée plus bas par le .catch()
+  if (!response.ok) {
+    throw new Error("Erreur lors de la récupération des cours");
+  }
+
+  // Sinon, on transforme la réponse en JSON utilisable : un tableau
+  // du type [{ course_id, course_name, module_id }, ...]
+  return response.json();
+}
+
+const lessonDetails = [
   {
-    id: 1,
-    name: "Introduction à Airbooks",
-    lessons: [
-      "Présentation générale",
-      "Interface principale",
-      "Paramétrage initial",
+    description:
+      "Dans cette leçon, vous découvrirez les fonctionnalités principales d'AirBooks ainsi que son interface afin de vous familiariser avec l'environnement de travail.",
+
+    objectives: [
+      "Découvrir l'interface d'AirBooks",
+      "Comprendre les principales fonctionnalités",
+      "Naviguer dans les différents menus",
     ],
+
+    duration: "15 min",
   },
+
   {
-    id: 2,
-    name: "Gestion des réservations",
-    lessons: [
-      "Créer une réservation",
-      "Modifier une réservation",
-      "Annuler et rembourser",
+    description:
+      "Cette leçon explique comment utiliser l'interface principale d'AirBooks et accéder rapidement aux différentes fonctionnalités disponibles.",
+
+    objectives: [
+      "Identifier les menus principaux",
+      "Utiliser le tableau de bord",
+      "Comprendre les raccourcis de navigation",
     ],
-    active: true,
+
+    duration: "15 min",
+  },
+
+  {
+    description:
+      "Vous apprendrez à effectuer les premiers paramétrages nécessaires avant de commencer à utiliser AirBooks.",
+
+    objectives: [
+      "Configurer les paramètres de base",
+      "Personnaliser l'environnement",
+      "Vérifier les informations de l'agence",
+    ],
+
+    duration: "15 min",
+  },
+
+  {
+    description:
+      "Cette leçon présente les étapes nécessaires pour créer une nouvelle réservation dans AirBooks.",
+
+    objectives: [
+      "Sélectionner un vol",
+      "Saisir les informations du passager",
+      "Valider une réservation",
+    ],
+
+    duration: "15 min",
+  },
+
+  {
+    description:
+      "Vous apprendrez à rechercher une réservation existante et à modifier les informations du voyage ou du passager.",
+
+    objectives: [
+      "Rechercher une réservation",
+      "Modifier les informations du passager",
+      "Mettre à jour les dates du voyage",
+    ],
+
+    duration: "15 min",
+  },
+
+  {
+    description:
+      "Cette leçon explique comment annuler une réservation et effectuer un remboursement selon les règles de la compagnie aérienne.",
+
+    objectives: [
+      "Annuler une réservation",
+      "Lancer un remboursement",
+      "Suivre le statut du remboursement",
+    ],
+
+    duration: "15 min",
   },
 ];
 
@@ -693,177 +836,201 @@ function ScreenLesson({
   user,
   onNavigate,
   onLogout,
+  moduleId, // reçu depuis App() : c'est l'id du module cliqué sur l'accueil
 }: {
   user: AppUser;
   onNavigate: (s: Screen) => void;
   onLogout: () => void;
+  moduleId: number | null;
 }) {
+  // "courses" contient la liste des leçons une fois reçues du backend.
+  // Au début, elle est vide : rien n'est encore arrivé.
+  const [courses, setCourses] = useState<
+    { course_id: number; course_name: string; module_id: number }[]
+  >([]);
+
+  // "loading" sert à savoir si on est encore en train d'attendre la réponse
+  // du serveur (utile pour afficher "Chargement..." à l'écran).
+  const [loading, setLoading] = useState(true);
+
+  // "error" contient un message si l'appel au backend a échoué.
+  const [error, setError] = useState<string | null>(null);
+
+  // "activeLesson" retient quelle leçon est actuellement affichée
+  // (0 = la première leçon de la liste, 1 = la deuxième, etc.)
   const [activeLesson, setActiveLesson] = useState(0);
+
+  // ÉTAPE 2 : ce bloc s'exécute automatiquement à chaque fois que
+  // "moduleId" change (c'est-à-dire, à chaque fois qu'on clique sur un
+  // module différent depuis l'accueil). C'est ici qu'on va chercher les
+  // vraies données dans la base, via l'API.
+  useEffect(() => {
+    // Si aucun module n'a encore été choisi, on ne fait rien.
+    if (moduleId == null) {
+      setLoading(false);
+      return;
+    }
+
+    // On réinitialise l'affichage avant chaque nouvel appel :
+    // on remontre "Chargement...", on efface les anciennes erreurs,
+    // et on revient à la première leçon.
+    setLoading(true);
+    setError(null);
+    setActiveLesson(0);
+
+    // ÉTAPE 3 : on appelle vraiment l'API avec le moduleId reçu.
+    fetchCoursesByModule(moduleId)
+      .then((data) => setCourses(data)) // si ça marche : on stocke les leçons reçues
+      .catch((err) => {
+        console.error(err);
+        setError("Impossible de charger les leçons de ce module.");
+      })
+      .finally(() => setLoading(false)); // dans tous les cas : on arrête le "Chargement..."
+  }, [moduleId]);
+
+  function nextLesson() {
+    // Vérifie qu'il reste une leçon après celle affichée
+    if (activeLesson < courses.length - 1) {
+      setActiveLesson(activeLesson + 1);
+    } else {
+      // Toutes les leçons sont terminées
+      onNavigate("quiz");
+    }
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <NavInternal user={user} onNavigate={onNavigate} onLogout={onLogout} />
       <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar */}
+        {/* Sidebar : liste des leçons du module en cours */}
         <aside className="w-64 bg-white border-r border-gray-100 flex-shrink-0 flex flex-col">
           <div className="flex-1 overflow-y-auto py-6 px-4">
-            {sidebarModules.map((mod) => (
-              <div key={mod.id} className="mb-4">
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider px-2 mb-2">
-                  Module {mod.id}
-                </p>
-                <p className="text-sm font-semibold text-gray-700 px-2 mb-2">
-                  {mod.name}
-                </p>
-                <ul className="space-y-0.5">
-                  {mod.lessons.map((lesson, i) => (
-                    <li key={i}>
-                      <button
-                        onClick={() => mod.active && setActiveLesson(i)}
-                        className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${mod.active && activeLesson === i ? "bg-blue-50 text-blue-700 font-medium" : mod.active ? "text-gray-600 hover:bg-gray-50" : "text-gray-300 cursor-default"}`}
-                      >
-                        {mod.active && (
-                          <span className="inline-block w-4 h-4 rounded-full border-2 border-current mr-2 align-middle" />
-                        )}
-                        {lesson}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider px-2 mb-2">
+              Module {moduleId ?? "—"}
+            </p>
+            <ul className="space-y-0.5">
+              {/* On affiche une ligne cliquable par leçon reçue de l'API */}
+              {courses.map((course, i) => (
+                <li key={course.course_id}>
+                  <button
+                    onClick={() => setActiveLesson(i)}
+                    className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${activeLesson === i ? "bg-blue-50 text-blue-700 font-medium" : "text-gray-600 hover:bg-gray-50"}`}
+                  >
+                    <span className="inline-block w-4 h-4 rounded-full border-2 border-current mr-2 align-middle" />
+                    {course.course_name}
+                  </button>
+                </li>
+              ))}
+            </ul>
           </div>
         </aside>
 
-        {/* Main */}
+        {/* Main : contenu de la leçon actuellement sélectionnée */}
         <main className="flex-1 px-8 py-8 overflow-y-auto">
-          {/* Title */}
-          <div className="mb-5">
-            <p className="text-xs font-semibold text-blue-600 uppercase tracking-wider mb-1">
-              Module 2 · Gestion des réservations
-            </p>
-            <h2 className="text-xl font-bold text-gray-900">
-              Leçon {activeLesson + 1} —{" "}
-              {sidebarModules[1].lessons[activeLesson]}
-            </h2>
-          </div>
+          {/* Cas 1 : on attend encore la réponse du serveur */}
+          {loading && (
+            <p className="text-sm text-gray-500">Chargement des leçons…</p>
+          )}
 
-          {/* Video + Description side by side */}
-          <div className="flex gap-6 items-start">
-            {/* Video player */}
-            <div className="flex-1 min-w-0">
-              <div className="bg-black rounded-2xl aspect-video w-full flex items-center justify-center relative overflow-hidden">
-                <div className="absolute inset-0 bg-gradient-to-br from-gray-800 to-gray-900" />
-                <button className="relative w-16 h-16 rounded-full bg-white/20 border-2 border-white/40 flex items-center justify-center hover:bg-white/30 transition-colors">
-                  <Play className="w-6 h-6 text-white fill-white ml-1" />
-                </button>
-                <div className="absolute bottom-0 left-0 right-0 px-4 pb-4">
-                  <div className="flex items-center gap-3">
-                    <span className="text-white text-xs font-mono">0:00</span>
-                    <div className="flex-1 h-1.5 bg-white/20 rounded-full">
-                      <div className="h-full w-0 bg-blue-400 rounded-full" />
+          {/* Cas 2 : l'appel API a échoué */}
+          {!loading && error && <p className="text-sm text-red-600">{error}</p>}
+
+          {/* Cas 3 : l'appel a réussi mais ce module n'a aucune leçon en base */}
+          {!loading && !error && courses.length === 0 && (
+            <p className="text-sm text-gray-500">
+              Aucune leçon trouvée pour ce module.
+            </p>
+          )}
+
+          {/* Cas 4 : tout s'est bien passé, on affiche la leçon active */}
+          {!loading && !error && courses.length > 0 && (
+            <>
+              {/* Title */}
+              <div className="mb-5">
+                <p className="text-xs font-semibold text-blue-600 uppercase tracking-wider mb-1">
+                  Module {moduleId}
+                </p>
+                <h2 className="text-xl font-bold text-gray-900">
+                  Leçon {activeLesson + 1} —{" "}
+                  {courses[activeLesson]?.course_name}
+                </h2>
+              </div>
+
+              <div className="flex gap-6 items-start">
+                {/* Vidéo */}
+                <div className="flex-1 min-w-0">
+                  <div className="bg-black rounded-2xl aspect-video w-full flex items-center justify-center relative overflow-hidden">
+                    <div className="absolute inset-0 bg-gradient-to-br from-gray-800 to-gray-900" />
+
+                    <button className="relative w-16 h-16 rounded-full bg-white/20 border-2 border-white/40 flex items-center justify-center hover:bg-white/30">
+                      <Play className="w-6 h-6 text-white fill-white ml-1" />
+                    </button>
+                  </div>
+
+                  <div className="mt-5">
+                    <button
+                      onClick={nextLesson}
+                      className="bg-blue-600 text-white px-6 py-2.5 rounded-lg font-semibold flex items-center gap-2"
+                    >
+                      {activeLesson === courses.length - 1
+                        ? "Commencer le quiz"
+                        : "Leçon suivante"}
+
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Description à droite */}
+                <div className="w-80 flex-shrink-0 bg-white rounded-2xl border border-gray-100 p-5">
+                  <h3 className="font-bold text-gray-800 mb-3">
+                    Description du cours
+                  </h3>
+
+                  <p className="text-sm text-gray-500 leading-relaxed mb-5">
+                    {lessonDetails[activeLesson]?.description}
+                  </p>
+
+                  <h3 className="font-bold text-gray-800 mb-3">
+                    Objectifs pédagogiques
+                  </h3>
+
+                  <ul className="space-y-2 mb-5">
+                    {lessonDetails[activeLesson]?.objectives.map(
+                      (objective, index) => (
+                        <li
+                          key={index}
+                          className="flex items-start gap-2 text-sm text-gray-500"
+                        >
+                          <CheckCircle className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
+
+                          {objective}
+                        </li>
+                      ),
+                    )}
+                  </ul>
+
+                  <div className="border-t pt-4">
+                    <div className="flex justify-between text-sm">
+                      <span>Durée</span>
+
+                      <span className="font-semibold">
+                        {lessonDetails[activeLesson]?.duration}
+                      </span>
                     </div>
-                    <span className="text-white text-xs font-mono">15:00</span>
+
+                    <div className="flex justify-between text-sm mt-3">
+                      <span>Quiz final</span>
+
+                      <span className="text-blue-600 font-semibold">
+                        Inclus
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
-
-              {/* Button below video */}
-              <div className="mt-5">
-                <button
-                  onClick={() => onNavigate("quiz")}
-                  className="bg-blue-600 text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700 transition-colors flex items-center gap-2"
-                >
-                  Leçon suivante <ChevronRight className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-
-            {/* Course description panel */}
-            <div className="w-72 flex-shrink-0 bg-white rounded-2xl border border-gray-100 p-5 flex flex-col gap-5">
-              <div>
-                <h3 className="text-sm font-bold text-gray-800 mb-2">
-                  Description du cours
-                </h3>
-                <p className="text-sm text-gray-500 leading-relaxed">
-                  {activeLesson === 0 &&
-                    "Dans cette leçon, vous apprendrez à créer une réservation complète dans Airbooks : sélection du vol, du passager et du mode de paiement, jusqu'à la confirmation finale."}
-                  {activeLesson === 1 &&
-                    "Cette leçon couvre la modification d'une réservation existante : changement de date, mise à jour des informations passager et gestion des frais de modification appliqués par la compagnie."}
-                  {activeLesson === 2 &&
-                    "Nous verrons ici les procédures d'annulation et de remboursement : conditions tarifaires, délais de traitement et étapes à suivre dans Airbooks pour initier un remboursement."}
-                </p>
-              </div>
-
-              <div>
-                <h3 className="text-sm font-bold text-gray-800 mb-2">
-                  Objectifs pédagogiques
-                </h3>
-                <ul className="space-y-2">
-                  {activeLesson === 0 && (
-                    <>
-                      <li className="flex items-start gap-2 text-sm text-gray-500">
-                        <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0 mt-0.5" />
-                        Naviguer dans l&apos;interface de réservation
-                      </li>
-                      <li className="flex items-start gap-2 text-sm text-gray-500">
-                        <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0 mt-0.5" />
-                        Saisir les informations passager correctement
-                      </li>
-                      <li className="flex items-start gap-2 text-sm text-gray-500">
-                        <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0 mt-0.5" />
-                        Valider et confirmer une réservation
-                      </li>
-                    </>
-                  )}
-                  {activeLesson === 1 && (
-                    <>
-                      <li className="flex items-start gap-2 text-sm text-gray-500">
-                        <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0 mt-0.5" />
-                        Retrouver une réservation existante
-                      </li>
-                      <li className="flex items-start gap-2 text-sm text-gray-500">
-                        <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0 mt-0.5" />
-                        Modifier les détails du vol ou du passager
-                      </li>
-                      <li className="flex items-start gap-2 text-sm text-gray-500">
-                        <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0 mt-0.5" />
-                        Comprendre les frais de modification
-                      </li>
-                    </>
-                  )}
-                  {activeLesson === 2 && (
-                    <>
-                      <li className="flex items-start gap-2 text-sm text-gray-500">
-                        <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0 mt-0.5" />
-                        Identifier les conditions d&apos;annulation
-                      </li>
-                      <li className="flex items-start gap-2 text-sm text-gray-500">
-                        <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0 mt-0.5" />
-                        Initier une demande de remboursement
-                      </li>
-                      <li className="flex items-start gap-2 text-sm text-gray-500">
-                        <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0 mt-0.5" />
-                        Suivre le statut du remboursement
-                      </li>
-                    </>
-                  )}
-                </ul>
-              </div>
-
-              <div className="border-t border-gray-100 pt-4">
-                <div className="flex items-center justify-between text-xs text-gray-400 mb-1">
-                  <span>Durée</span>
-                  <span className="font-semibold text-gray-600">15 min</span>
-                </div>
-                <div className="flex items-center justify-between text-xs text-gray-400 mb-1"></div>
-                <div className="flex items-center justify-between text-xs text-gray-400">
-                  <span>Quiz final</span>
-                  <span className="font-semibold text-blue-600">Inclus</span>
-                </div>
-              </div>
-            </div>
-          </div>
+            </>
+          )}
         </main>
       </div>
     </div>
@@ -1082,67 +1249,6 @@ function ScreenQuizResults({
 }
 
 // ─── Screen 8 — Manager Dashboard ────────────────────────────────────────────
-const employees: Record<
-  string,
-  {
-    name: string;
-    module: string;
-    done: number;
-    total: number;
-  }[]
-> = {
-  accountant: [
-    {
-      name: "Jean Koffi",
-      module: "Module 3 — Émission de billets",
-      done: 2,
-      total: 4,
-    },
-    {
-      name: "Fatou Diallo",
-      module: "Module 2 — Gestion des réservations",
-      done: 1,
-      total: 3,
-    },
-    {
-      name: "Amara Traoré",
-      module: "Module 4 — Facturation",
-      done: 3,
-      total: 4,
-    },
-  ],
-  booking: [
-    {
-      name: "Marie Dupont",
-      module: "Module 2 — Gestion des réservations",
-      done: 2,
-      total: 3,
-    },
-    {
-      name: "Luc Mensah",
-      module: "Module 1 — Introduction",
-      done: 3,
-      total: 3,
-    },
-  ],
-};
-
-const moduleCompletion: Record<string, { module: string; pct: number }[]> = {
-  accountant: [
-    { module: "Module 1", pct: 100 },
-    { module: "Module 2", pct: 82 },
-    { module: "Module 3", pct: 60 },
-    { module: "Module 4", pct: 40 },
-    { module: "Module 5", pct: 15 },
-  ],
-  booking: [
-    { module: "Module 1", pct: 100 },
-    { module: "Module 2", pct: 75 },
-    { module: "Module 3", pct: 50 },
-    { module: "Module 4", pct: 30 },
-    { module: "Module 5", pct: 10 },
-  ],
-};
 
 function ScreenManagerDashboard({
   user,
@@ -1150,10 +1256,78 @@ function ScreenManagerDashboard({
   onLogout,
 }: {
   user: AppUser;
-  onNavigate: (s: Screen) => void;
+  onNavigate: (screen: Screen) => void;
   onLogout: () => void;
 }) {
-  const [filter, setFilter] = useState<"accountant" | "booking">("accountant");
+  const [roles, setRoles] = useState<any[]>([]);
+  const [role, setRole] = useState("");
+
+  const [progressions, setProgressions] = useState<any[]>([]);
+
+  const [loading, setLoading] = useState(false);
+
+  // ==============================
+  // RECUPERER LES ROLES
+  // ==============================
+
+  async function getStaff() {
+    try {
+      const response = await fetch("http://localhost:5000/getStaff");
+
+      const data = await response.json();
+
+      // garder seulement Accountant et Booking
+
+      const filteredRoles = data.filter(
+        (item: any) =>
+          item.role_name === "Accountant" || item.role_name === "Booking Staff",
+      );
+
+      setRoles(filteredRoles);
+
+      // mettre le premier rôle par défaut
+
+      if (filteredRoles.length > 0) {
+        setRole(filteredRoles[0].role_name);
+      }
+    } catch (error) {
+      console.log("Erreur récupération rôles", error);
+    }
+  }
+
+  // ==============================
+  // RECUPERER LA PROGRESSION
+  // ==============================
+
+  async function getProgression() {
+    if (role === "") return;
+
+    try {
+      setLoading(true);
+
+      const response = await fetch(
+        `http://localhost:5000/progression?role=${role}`,
+      );
+
+      const data = await response.json();
+
+      console.log("Progression : ", data);
+
+      setProgressions(data);
+    } catch (error) {
+      console.log("Erreur progression", error);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    getStaff();
+  }, []);
+
+  useEffect(() => {
+    getProgression();
+  }, [role]);
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
@@ -1163,86 +1337,125 @@ function ScreenManagerDashboard({
         onLogout={onLogout}
         activeTab="dashboard"
       />
-      <main className="flex-1 max-w-4xl mx-auto w-full px-6 py-10">
-        <div className="flex items-center justify-between mb-8">
-          <h1 className="text-2xl font-bold text-gray-900">Tableau de bord</h1>
+
+      <main className="flex-1 max-w-5xl mx-auto w-full px-6 py-10">
+        <div className="mb-8">
+          <h1 className="text-2xl font-bold text-gray-900">
+            Tableau de bord Manager
+          </h1>
+
+          <p className="text-gray-500 text-sm mt-1">
+            Suivi de progression des employés
+          </p>
+        </div>
+
+        {/* FILTRE ROLE */}
+
+        <div className="bg-white rounded-xl border p-5 mb-6">
+          <label className="block text-sm font-semibold text-gray-700 mb-2">
+            Filtrer par rôle
+          </label>
+
           <select
-            value={filter}
-            onChange={(e) =>
-              setFilter(e.target.value as "accountant" | "booking")
-            }
-            className="border border-gray-200 rounded-lg px-4 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-700"
+            value={role}
+            onChange={(e) => setRole(e.target.value)}
+            className="
+            border
+            border-gray-200
+            rounded-lg
+            px-4
+            py-2
+            text-sm
+            bg-gray-50
+            "
           >
-            <option value="accountant">Accountant / Comptable</option>
-            <option value="booking">Booking Staff</option>
+            {roles.map((item) => (
+              <option key={item.role_id} value={item.role_name}>
+                {item.role_name}
+              </option>
+            ))}
           </select>
         </div>
 
-        <section className="bg-white rounded-2xl border border-gray-100 p-6 mb-6">
-          <h2 className="font-semibold text-gray-900 mb-1">
-            Section 1 — Progression individuelle
-          </h2>
-          <p className="text-xs text-gray-400 mb-5">
-            <span className="inline-flex items-center gap-3">
-              <span>● Module validée</span>
-              <span>○ Module restant</span>
-            </span>
-          </p>
-          <div className="space-y-4">
-            {employees[filter].map((emp, i) => (
-              <div
-                key={i}
-                className="flex items-start gap-4 py-3 border-b border-gray-50 last:border-0"
-              >
-                <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
-                  <User className="w-4 h-4 text-blue-600" />
-                </div>
-                <div className="flex-1">
-                  <p className="font-semibold text-sm text-gray-800">
-                    {emp.name}
-                  </p>
-                  <p className="text-xs text-gray-400 mt-0.5">{emp.module}</p>
-                  <div className="flex gap-1.5 mt-2">
-                    {Array.from({ length: emp.total }).map((_, j) => (
-                      <span
-                        key={j}
-                        className={`text-base leading-none ${j < emp.done ? "text-green-600" : "text-gray-300"}`}
-                      >
-                        {j < emp.done ? "●" : "○"}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
+        {loading && <p className="text-gray-500">Chargement...</p>}
 
-        <section className="bg-white rounded-2xl border border-gray-100 p-6">
-          <h2 className="font-semibold text-gray-900 mb-5">
-            Section 2 — Taux de complétion moyen par module
-          </h2>
-          <div className="space-y-4">
-            {moduleCompletion[filter].map((item, i) => (
-              <div key={i}>
-                <div className="flex justify-between text-sm mb-1.5">
-                  <span className="text-gray-700 font-medium">
-                    {item.module}
-                  </span>
-                  <span className="text-gray-500 font-semibold">
-                    {item.pct}%
-                  </span>
-                </div>
-                <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-blue-500 rounded-full"
-                    style={{ width: `${item.pct}%` }}
-                  />
-                </div>
+        <div className="space-y-5">
+          {progressions.map((employee, index) => (
+            <div
+              key={index}
+              className="
+                bg-white
+                rounded-xl
+                border
+                border-gray-100
+                p-6
+                "
+            >
+              <h2
+                className="
+                text-lg
+                font-semibold
+                text-gray-900
+                "
+              >
+                {employee.user_name}
+              </h2>
+
+              <p
+                className="
+                text-sm
+                text-gray-500
+                mt-2
+                "
+              >
+                Module actuel :
+                <span
+                  className="
+                  ml-1
+                  font-semibold
+                  text-blue-600
+                  "
+                >
+                  Module {employee.actual_module || 0}
+                </span>
+              </p>
+
+              {/* PROGRESSION */}
+
+              <div
+                className="
+                flex
+                gap-2
+                mt-5
+                "
+              >
+                {Array.from({
+                  length: employee.total_modules,
+                }).map((_, i) => {
+                  const completed = i + 1 < employee.actual_module;
+
+                  return (
+                    <span key={i} className="text-3xl">
+                      {completed ? "●" : "○"}
+                    </span>
+                  );
+                })}
               </div>
-            ))}
-          </div>
-        </section>
+
+              <p
+                className="
+                text-xs
+                text-gray-400
+                mt-3
+                "
+              >
+                {Math.max(employee.actual_module - 1, 0)}/
+                {employee.total_modules}
+                modules terminés
+              </p>
+            </div>
+          ))}
+        </div>
       </main>
     </div>
   );
@@ -1629,9 +1842,22 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>("landing");
   const [user, setUser] = useState<AppUser>(DEFAULT_USER);
 
+  // Cette variable retient l'id du DERNIER module sur lequel l'agent a
+  // cliqué "Consulter". C'est elle qui fait le lien entre l'écran
+  // d'accueil (où on choisit un module) et l'écran de la leçon
+  // (qui doit savoir quel module afficher).
+  const [selectedModuleId, setSelectedModuleId] = useState<number | null>(null);
+
   function navigate(s: Screen) {
     setScreen(s);
     window.scrollTo(0, 0);
+  }
+
+  // Appelée quand l'agent clique sur "Consulter" pour un module précis :
+  // on retient l'id du module, puis on va vers l'écran de la leçon.
+  function openModule(moduleId: number) {
+    setSelectedModuleId(moduleId);
+    navigate("lesson");
   }
 
   function login(u: AppUser) {
@@ -1662,8 +1888,12 @@ export default function App() {
       {screen === "login-expired" && (
         <ScreenLogin onNavigate={navigate} onLogin={login} expired />
       )}
-      {screen === "agent-home" && <ScreenAgentHome {...sharedProps} />}
-      {screen === "lesson" && <ScreenLesson {...sharedProps} />}
+      {screen === "agent-home" && (
+        <ScreenAgentHome {...sharedProps} onOpenModule={openModule} />
+      )}
+      {screen === "lesson" && (
+        <ScreenLesson {...sharedProps} moduleId={selectedModuleId} />
+      )}
       {screen === "quiz" && <ScreenQuiz {...sharedProps} />}
       {screen === "quiz-results-pass" && (
         <ScreenQuizResults pass {...sharedProps} />
