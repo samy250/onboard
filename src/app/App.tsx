@@ -53,6 +53,8 @@ const PROFILE_LABELS: Record<Profile, string> = {
   admin: "Administrateur",
 };
 
+let currentModule = 0;
+
 // Maps a profile to its default home screen
 function homeScreen(profile: string): Screen {
   console.log(`screen => ${JSON.stringify(profile)}`);
@@ -1117,7 +1119,7 @@ function ScreenQuiz({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          module_id: 1,
+          module_id: currentModule,
         }),
       });
 
@@ -1997,6 +1999,7 @@ export default function App() {
   // on retient l'id du module, puis on va vers l'écran de la leçon.
   function openModule(moduleId: number) {
     setSelectedModuleId(moduleId);
+    currentModule = moduleId;
     navigate("lesson");
   }
 
