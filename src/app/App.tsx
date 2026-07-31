@@ -708,8 +708,8 @@ function ScreenAgentHome({
   useEffect(() => {
     fetchAgentModules()
       .then((rows) => {
-        setModules(groupRowsByModule(rows))
-        moduleList = groupRowsByModule(rows)
+        setModules(groupRowsByModule(rows));
+        moduleList = groupRowsByModule(rows);
       })
       .catch((err) => {
         console.error(err);
@@ -1141,8 +1141,6 @@ function ScreenQuiz({
 
       const data = await response.json();
 
-      console.log(data);
-
       setQuizQuestions(data);
     } catch (error) {
       console.error(error);
@@ -1158,6 +1156,8 @@ function ScreenQuiz({
         },
         body: JSON.stringify({
           questions: selected,
+          module_id: currentModule,
+          user_id: currentUser,
         }),
       });
 
@@ -1285,18 +1285,35 @@ function ScreenQuizResults({
   onNavigate: (s: Screen) => void;
   onLogout: () => void;
 }) {
+  async function fetchAgentModules() {
+    const response = await fetch("http://localhost:5000/tracking", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId: currentUser }),
+    });
 
-  function nextCourse() {
+    if (!response.ok) {
+      throw new Error("Erreur lors de la récupération des modules");
+    }
+
+    // Le backend renvoie un tableau du type :
+    // [{ user_name, module_id, title, progression_status }, ...]
+    // avec PLUSIEURS lignes pour le même module (une par question).
+    return response.json();
+  }
+
+  async function nextCourse() {
     let count = 0;
     for (let module of moduleList) {
       if (module.id === currentModule) {
         if (count < moduleList.length) {
           currentModule = moduleList[count + 1].id;
-          onNavigate("lesson");
+          await fetchAgentModules();
         } else {
-          currentModule = moduleList[0].id
-          onNavigate("agent-home");
+          await fetchAgentModules();
+          currentModule = moduleList[0].id;
         }
+        onNavigate("agent-home");
       }
       count++;
     }
@@ -1308,9 +1325,6 @@ function ScreenQuizResults({
         <h1 className="text-xl font-bold text-gray-900 mb-2">
           Résultats du Quiz
         </h1>
-        <p className="text-sm text-gray-500 mb-7">
-          Module 2 — Gestion des réservations
-        </p>
         <div className="space-y-4 mb-8">
           {quizResults.map((result, i) => (
             <div
@@ -1975,7 +1989,7 @@ function NavOverlay({
 
   return (
     <>
-      <button
+      {/* <button
         onClick={() => setOpen(!open)}
         className="fixed bottom-5 right-5 z-50 w-12 h-12 bg-gray-900 text-white rounded-full shadow-lg flex items-center justify-center hover:bg-gray-700 transition-colors"
       >
@@ -2001,7 +2015,7 @@ function NavOverlay({
             ))}
           </div>
         </div>
-      )}
+      )} */}
     </>
   );
 }
