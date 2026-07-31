@@ -55,7 +55,7 @@ const PROFILE_LABELS: Record<Profile, string> = {
 
 let currentUser: any = null;
 let currentModule: any = null;
-let moduleList = [];
+let moduleList: any[] = [];
 
 // Maps a profile to its default home screen
 function homeScreen(profile: string): Screen {
