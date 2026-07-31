@@ -55,6 +55,7 @@ const PROFILE_LABELS: Record<Profile, string> = {
 
 let currentUser: any = null;
 let currentModule: any = null;
+let moduleList = [];
 
 // Maps a profile to its default home screen
 function homeScreen(profile: string): Screen {
@@ -280,6 +281,7 @@ function ScreenSignup({
 
   const [staffType, setStaffType] = useState<any[]>([]);
 
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [agency, setAgency] = useState("");
@@ -305,7 +307,7 @@ function ScreenSignup({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          user_name: "",
+          user_name: name,
           password,
           email,
           role_id: profile,
@@ -363,6 +365,11 @@ function ScreenSignup({
                   <input
                     type="text"
                     placeholder="Marie"
+                    value={name}
+                    onChange={(e) => {
+                      setName(e.target.value);
+                      setErrorMessage("");
+                    }}
                     className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50"
                   />
                 </div>
@@ -700,7 +707,10 @@ function ScreenAgentHome({
   // Se déclenche une seule fois, quand l'écran d'accueil s'affiche.
   useEffect(() => {
     fetchAgentModules()
-      .then((rows) => setModules(groupRowsByModule(rows)))
+      .then((rows) => {
+        setModules(groupRowsByModule(rows))
+        moduleList = groupRowsByModule(rows)
+      })
       .catch((err) => {
         console.error(err);
         setError("Impossible de charger vos modules.");
@@ -1275,6 +1285,22 @@ function ScreenQuizResults({
   onNavigate: (s: Screen) => void;
   onLogout: () => void;
 }) {
+
+  function nextCourse() {
+    let count = 0;
+    for (let module of moduleList) {
+      if (module.id === currentModule) {
+        if (count < moduleList.length) {
+          currentModule = moduleList[count + 1].id;
+          onNavigate("lesson");
+        } else {
+          currentModule = moduleList[0].id
+          onNavigate("agent-home");
+        }
+      }
+      count++;
+    }
+  }
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <NavInternal user={user} onNavigate={onNavigate} onLogout={onLogout} />
@@ -1315,7 +1341,7 @@ function ScreenQuizResults({
               </p>
             </div>
             <button
-              onClick={() => onNavigate("lesson")}
+              onClick={() => nextCourse()}
               className="bg-blue-600 text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700 transition-colors"
             >
               Cours suivant
